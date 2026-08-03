@@ -210,3 +210,138 @@ resource "aws_security_group" "ec2" {
   }
 }
 
+# ALB
+
+resource "aws_lb" "whoami" {
+  name               = "whoami-alb"
+  internal           = false
+  load_balancer_type = "application"
+
+  security_groups = [
+    aws_security_group.alb.id
+  ]
+
+  subnets = [
+    aws_subnet.public-a.id,
+    aws_subnet.public-b.id
+  ]
+
+  tags = {
+    Name = "whoami-alb"
+  }
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.whoami.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.whoami.arn
+  }
+}
+
+# LAUNCH TEMPLATE
+
+resource "aws_launch_template" "whoami" {
+
+  name = "whoami-launch-template"
+
+  image_id = "ami-030534b12959b3888"
+
+  instance_type = "t3.micro"
+
+  vpc_security_group_ids = [
+    aws_security_group.ec2.id
+  ]
+
+  block_device_mappings {
+
+  device_name = "/dev/xvda"
+
+  ebs {
+
+    volume_size = 8
+
+    volume_type = "gp3"
+
+    delete_on_termination = true
+
+  }
+ }
+}
+
+# TARGET GROUP
+
+resource "aws_lb_target_group" "whoami" {
+  name     = "whoami-target-group"
+  port     = 80
+  protocol = "HTTP"
+
+  vpc_id = aws_vpc.main.id
+
+  target_type = "instance"
+
+  health_check {
+
+    enabled = true
+
+    path = "/"
+
+    protocol = "HTTP"
+
+    matcher = "200"
+
+    healthy_threshold = 2
+
+    unhealthy_threshold = 2
+
+    interval = 30
+
+    timeout = 5
+
+  }
+
+  tags = {
+
+    Name = "whoami-target-group"
+
+  }
+}
+
+# ASG
+
+resource "aws_autoscaling_group" "whoami" {
+
+  name = "whoami-asg"
+
+  desired_capacity = 2
+  min_size         = 2
+  max_size         = 4
+
+  vpc_zone_identifier = [
+    aws_subnet.private-a.id,
+    aws_subnet.private-b.id
+  ]
+
+  target_group_arns = [
+    aws_lb_target_group.whoami.arn
+  ]
+
+  health_check_type = "ELB"
+
+  launch_template {
+
+    id = aws_launch_template.whoami.id
+
+    version = "$Latest"
+
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "whoami-server"
+    propagate_at_launch = true
+  }
+}
